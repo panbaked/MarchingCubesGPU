@@ -78,15 +78,17 @@ int MCGPU::setupCL(void)
 	this->program = cl::Program(this->context, source);
 	err = program.build(devices);
 	
-	if(err == CL_BUILD_PROGRAM_FAILURE)
+	if(err == CL_BUILD_PROGRAM_FAILURE || err == CL_BUILD_ERROR)
 	{
-		cl::STRING_CLASS str = program.getBuildInfo<CL_PROGRAM_BUILD_LOG>(devices[0]);
-		std::cout << " \n\t\t\tBUILD LOG\n";
-        std::cout << " ************************************************\n";
-        std::cout << str.c_str() << std::endl;
-        std::cout << " ************************************************\n";
+	
 	}
 	
+	cl::STRING_CLASS str = program.getBuildInfo<CL_PROGRAM_BUILD_LOG>(devices[0]);
+	std::cout << " \n\t\t\tBUILD LOG\n";
+    std::cout << " ************************************************\n";
+    std::cout << str.c_str() << std::endl;
+    std::cout << " ************************************************\n";
+
 	cl_device_type deviceName = devices[0].getInfo<CL_DEVICE_TYPE>();
 
 	std::cout << deviceName << std::endl;
@@ -94,19 +96,41 @@ int MCGPU::setupCL(void)
 	this->queue = cl::CommandQueue(this->context, devices[0], 0, &err);
 	checkErr(err, "CommandQueue::CommandQueue()");
 
+
 	err = this->allocateBuffers();
 	checkErr(err, "Buffer allocationg failed.");
 
+		
+	cl::Kernel testKernel(program, "displayTriBuffer", &err);
+	err = testKernel.setArg(0, triTableImage);
+
+	err = queue.enqueueNDRangeKernel(testKernel, cl::NullRange, cl::NDRange(256), cl::NDRange(1));
+
+	err = queue.finish();
+	
 	return err;
 }
 int MCGPU::allocateBuffers()
 {
 	int err;
 	//Lookup tables
-	this->triTableImage = cl::Image2D(context, CL_MEM_READ_ONLY | CL_MEM_COPY_HOST_PTR, cl::ImageFormat(CL_R, CL_UNSIGNED_INT8), 256, 16, 0, (void*) triTable, &err);
+	cl::size_t<3> origin;
+	origin[0] = 0;
+	origin[1] = 0;
+	origin[2] = 0;
+
+	cl::size_t<3> region;
+	region[0] = 256;
+	region[1] = 16;
+	region[2] = 0;
+
+	this->triTableImage = cl::Image2D(context, CL_MEM_READ_ONLY | CL_MEM_COPY_HOST_PTR, cl::ImageFormat(CL_R, CL_UNSIGNED_INT8), 16, 256, 0, &triTable, &err);
 	checkErr(err, "Tritable image failed");
 
-	this->vertTableImage = cl::Image2D(context, CL_MEM_READ_ONLY | CL_MEM_COPY_HOST_PTR, cl::ImageFormat(CL_R, CL_UNSIGNED_INT8), 256, 1, 0, (void*) numVertsTable, &err);
+	//err = queue.enqueueWriteImage(triTableImage, CL_TRUE, origin, region, 0, 0, &triTable, NULL, NULL);
+//	checkErr(err, "Could not write tritable");
+
+	this->vertTableImage = cl::Image2D(context, CL_MEM_READ_ONLY | CL_MEM_COPY_HOST_PTR, cl::ImageFormat(CL_R, CL_UNSIGNED_INT8), 256, 1, 0, numVertsTable, &err);
 	checkErr(err, "Verttable image failed");
 
 	//Volume map
@@ -220,15 +244,20 @@ int MCGPU::march()
 	checkErr(err, "out vert count could not be fetched");
 
 	std::vector<cl_uint2> occpiedCubesPtr = std::vector<cl_uint2>(TOTAL_CUBES);
+	
 
 	err = this->queue.enqueueReadBuffer(occupiedCubes, CL_TRUE, 0, TOTAL_CUBES*sizeof(cl_uint2), &occpiedCubesPtr[0]);
 	checkErr(err, "occupied cubes could not be fetched");
 
-	
 	int vertCount = 0;
 	for(int i = 0; i < WORK_GROUPS; i++)
 	{
 		vertCount += vertCountArray[i];
+	}
+	int vertCount2 = 0;
+	for(int i = 0; i < TOTAL_CUBES; i++)
+	{
+		vertCount2 += occpiedCubesPtr[i].s[1];
 	}
 
 	std::cout << "Generated " << vertCount << " vertices." << std::endl;
@@ -266,7 +295,7 @@ int MCGPU::march()
 	err = queue.enqueueNDRangeKernel(compactKernel, cl::NullRange, cl::NDRange(MARCH_SIZE, MARCH_SIZE, MARCH_SIZE), cl::NDRange(1, 1, 1));
 	err = queue.finish();
 
-	std::vector<cl_int8> compactedCubes = std::vector<cl_int8>(cubeCount);
+	std::vector<cl_int4> compactedCubes = std::vector<cl_int4>(cubeCount);
 
 	err = queue.enqueueReadBuffer(compactedCubesBuffer, CL_TRUE, 0, cubeCount * sizeof(cl_int4), &compactedCubes[0]);
 
@@ -294,6 +323,7 @@ int MCGPU::march()
 	err = queue.enqueueReadBuffer(vertexBuffer, CL_TRUE, 0, vertCount * sizeof(cl_float4), &vertices[0]);
 
 	std::cout << "Done marching." << std::endl;
+
 
 	return err;
 

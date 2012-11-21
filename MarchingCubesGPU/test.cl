@@ -4,6 +4,18 @@
 __constant sampler_t volumeSampler = CLK_NORMALIZED_COORDS_FALSE | CLK_ADDRESS_CLAMP_TO_EDGE | CLK_FILTER_NEAREST;
 __constant sampler_t tableSampler = CLK_NORMALIZED_COORDS_FALSE | CLK_ADDRESS_CLAMP_TO_EDGE | CLK_FILTER_NEAREST;
 
+__kernel void
+displayTriBuffer(__read_only image2d_t triTex)
+{
+	size_t x = get_global_id(0);
+	printf("\n %i :",x);
+	for(int i = 0; i < 16; i++)
+	{
+		int v = read_imageui(triTex, tableSampler, (int2)(i, x)).x;
+		printf(" %i", v);
+	}
+}
+
 __kernel void 
 computeDensityField(__global float4 * out, float blockSize, uint points)
 {
@@ -56,18 +68,17 @@ calculateVertices(__global float4 * volume, float isovalue, __global uint * outV
 	size_t localSize = get_local_size(0);
 
 	size_t size = get_global_size(0);
-
-	int4 coord = (int4)(x, y, z, 0); //bottom left corner
+	size_t vConvSize = (size_t)pow((float)size, 2.0f); //conversion factor to index into volume from cubes
 
 	uint cubeVertIndices[8];
-	cubeVertIndices[0] = (x + y * size + z * size * size) * 2;
-	cubeVertIndices[1] = (x * 2 + y * 2 * size + (z * 2 + 1) * size * size);
-	cubeVertIndices[2] = ((x * 2 + 1) + y * 2 * size + (z * 2 + 1) * size * size);
-	cubeVertIndices[3] = ((x* 2 + 1) + y * 2 * size + z * 2 * size * size);
-	cubeVertIndices[4] = (x * 2 + (y * 2 + 1) * size + z * 2 * size * size);
-	cubeVertIndices[5] = (x * 2 + (y * 2 + 1) * size + (z * 2 + 1) * size * size);
-	cubeVertIndices[6] = ((x * 2 + 1) + (y * 2 + 1) * size + (z * 2 + 1) * size * size);
-	cubeVertIndices[7] = ((x * 2 + 1) + (y * 2 + 1) * size + z * 2 * size * size);
+	cubeVertIndices[0] = x + y * vConvSize + z * vConvSize * vConvSize;
+	cubeVertIndices[1] = x + y * vConvSize + (z + 1) * vConvSize * vConvSize;
+	cubeVertIndices[2] = (x + 1) + y * vConvSize + (z + 1) * vConvSize * vConvSize;
+	cubeVertIndices[3] = (x + 1) + y * vConvSize + z * vConvSize * vConvSize;
+	cubeVertIndices[4] = x + (y + 1) * vConvSize + z * vConvSize * vConvSize;
+	cubeVertIndices[5] = x + (y + 1) * vConvSize + (z + 1) * vConvSize * vConvSize;
+	cubeVertIndices[6] = (x + 1) + (y + 1) * vConvSize + (z + 1) * vConvSize * vConvSize;
+	cubeVertIndices[7] = (x + 1) + (y + 1) * vConvSize + z * vConvSize * vConvSize;
 		 /*
 	for(int i = 0; i < 8; i++)
 	{
@@ -114,7 +125,7 @@ calculateVertices(__global float4 * volume, float isovalue, __global uint * outV
 
 	uint reductionIndex = x + y * size/localSize + z * size/localSize * size/localSize; 
 	uint localIndex = xLocal+yLocal*localSize+zLocal*localSize*localSize;
-	uint cubePosition = coord.x+coord.y*size + coord.z*size*size;
+	uint cubePosition = x+y*size + z*size*size;
 
 	uint populated = (vertCount > 0);
 
@@ -165,7 +176,7 @@ computePrefixArray(__global uint2 *occupiedCubes, __global uint2 *prefixArray, u
 		}
 	}
 	barrier(CLK_LOCAL_MEM_FENCE);
-	printf("%i %i, %i \n", i, vertCount, count);
+//	printf("%i %i, %i \n", i, vertCount, count);
 	prefixArray[i].x = count;
 	prefixArray[i].y = vertCount;
 }
@@ -193,17 +204,17 @@ generateTriangles(__global float4 * volume, float isovalue, __global float4 * ou
 {
 	size_t index = get_global_id(0);
 
-	int4 coord = compactedCubeArray[index];
+	size_t vConvSize = (size_t)pow((float)size, 2.0f); //volume conversion factor to index into volume from cubes
 
 	uint cubeVertIndices[8];
-	cubeVertIndices[0] = (coord.x + coord.y * size + coord.z * size * size) * 2;
-	cubeVertIndices[1] = (coord.x * 2 + coord.y * 2 * size + (coord.z * 2 + 1) * size * size);
-	cubeVertIndices[2] = ((coord.x * 2 + 1) + coord.y * 2 * size + (coord.z * 2 + 1) * size * size);
-	cubeVertIndices[3] = ((coord.x* 2 + 1) + coord.y * 2 * size + coord.z * 2 * size * size);
-	cubeVertIndices[4] = (coord.x * 2 + (coord.y * 2 + 1) * size + coord.z * 2 * size * size);
-	cubeVertIndices[5] = (coord.x * 2 + (coord.y * 2 + 1) * size + (coord.z * 2 + 1) * size * size);
-	cubeVertIndices[6] = ((coord.x * 2 + 1) + (coord.y * 2 + 1) * size + (coord.z * 2 + 1) * size * size);
-	cubeVertIndices[7] = ((coord.x * 2 + 1) + (coord.y * 2 + 1) * size + coord.z * 2 * size * size);
+	cubeVertIndices[0] = compactedCubeArray[index].x + compactedCubeArray[index].y * vConvSize + compactedCubeArray[index].z * vConvSize * vConvSize;
+	cubeVertIndices[1] = compactedCubeArray[index].x + compactedCubeArray[index].y * vConvSize + (compactedCubeArray[index].z + 1) * vConvSize * vConvSize;
+	cubeVertIndices[2] = (compactedCubeArray[index].x + 1) + compactedCubeArray[index].y * vConvSize + (compactedCubeArray[index].z + 1) * vConvSize * vConvSize;
+	cubeVertIndices[3] = (compactedCubeArray[index].x + 1) + compactedCubeArray[index].y * vConvSize + compactedCubeArray[index].z * vConvSize * vConvSize;
+	cubeVertIndices[4] = compactedCubeArray[index].x + (compactedCubeArray[index].y + 1) * vConvSize + compactedCubeArray[index].z * vConvSize * vConvSize;
+	cubeVertIndices[5] = compactedCubeArray[index].x + (compactedCubeArray[index].y + 1) * vConvSize + (compactedCubeArray[index].z + 1) * vConvSize * vConvSize;
+	cubeVertIndices[6] = (compactedCubeArray[index].x + 1) + (compactedCubeArray[index].y + 1) * vConvSize + (compactedCubeArray[index].z + 1) * vConvSize * vConvSize;
+	cubeVertIndices[7] = (compactedCubeArray[index].x + 1) + (compactedCubeArray[index].y + 1) * vConvSize + compactedCubeArray[index].z * vConvSize * vConvSize;
 		 
 
 	float4 cubeVertices[8];
@@ -251,17 +262,16 @@ generateTriangles(__global float4 * volume, float isovalue, __global float4 * ou
 	uint numVerts = read_imageui(numVertsTex, tableSampler, (int2)(cubeIndex, 0)).x;
 	uint vertIndex = vertPrefixArray[index] + 1;
 
-	printf("%i \n", vertIndex);
 	for(int i = 0; i < numVerts; i +=3)
 	{
-		
-		outVerts[vertIndex+i] = vertList[read_imageui(triTex, tableSampler, (int2)(cubeIndex, i)).x];
-		outNormals[vertIndex+i] = normalList[read_imageui(triTex, tableSampler, (int2)(cubeIndex, i)).x];
-		outVerts[vertIndex+i+1] = vertList[read_imageui(triTex, tableSampler, (int2)(cubeIndex, i+1)).x];
-		outNormals[vertIndex+i+1] = normalList[read_imageui(triTex, tableSampler, (int2)(cubeIndex, i+1)).x];
-		outVerts[vertIndex+i+2] = vertList[read_imageui(triTex, tableSampler, (int2)(cubeIndex, i+2)).x];
-		outNormals[vertIndex+i+2] = normalList[read_imageui(triTex, tableSampler, (int2)(cubeIndex, i+2)).x];
+		outVerts[vertIndex+i] = vertList[read_imageui(triTex, tableSampler, (int2)(i, cubeIndex)).x];
+		outNormals[vertIndex+i] = normalList[read_imageui(triTex, tableSampler, (int2)(i, cubeIndex)).x];
+		outVerts[vertIndex+i+1] = vertList[read_imageui(triTex, tableSampler, (int2)(i+1, cubeIndex)).x];
+		outNormals[vertIndex+i+1] = normalList[read_imageui(triTex, tableSampler, (int2)(i+1, cubeIndex)).x];
+		outVerts[vertIndex+i+2] = vertList[read_imageui(triTex, tableSampler, (int2)(i+2, cubeIndex)).x];
+		outNormals[vertIndex+i+2] = normalList[read_imageui(triTex, tableSampler, (int2)(i+2, cubeIndex)).x];
 
 	}
 
 }
+
